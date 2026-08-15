@@ -27,6 +27,7 @@ import {
   getUkuleleVoicing,
   type ChordEvent,
 } from "./lib/chords";
+import { buildChordDiagramModel } from "./lib/chord-diagram";
 import { createChordDemoFile } from "./lib/demo-audio";
 import {
   buildChordPlaybackSequence,
@@ -34,6 +35,11 @@ import {
   LocalUkulelePlayer,
   type PlaybackSequence,
 } from "./lib/playback";
+import {
+  suggestRhythm,
+  type RhythmSuggestion,
+  type StrumDirection,
+} from "./lib/rhythm";
 import { transcribeLocally } from "./lib/transcription";
 import {
   mapNotesToUkulele,
@@ -103,12 +109,117 @@ function TabSystem({ notes, phraseIndex, baseIndex, activeIndex, tuning, onSelec
   );
 }
 
+type ChordDiagramProps = {
+  frets: number[];
+  stringNames: string[];
+};
+
+function ChordDiagram({ frets, stringNames }: ChordDiagramProps) {
+  const model = buildChordDiagramModel(frets);
+  const stringX = (stringIndex: number) => 20 + stringIndex * 16;
+  const nutY = 30;
+  const gridHeight = 72;
+  const fretHeight = gridHeight / model.fretCount;
+
+  return (
+    <span className="chord-diagram" aria-hidden="true">
+      <svg viewBox="0 0 88 112" focusable="false">
+        {stringNames.map((stringName, stringIndex) => (
+          <text className="chord-diagram__string-name" x={stringX(stringIndex)} y="8" textAnchor="middle" key={`${stringName}-${stringIndex}`}>
+            {stringName}
+          </text>
+        ))}
+        {model.openStrings.map((stringIndex) => (
+          <circle className="chord-diagram__open" cx={stringX(stringIndex)} cy="19" r="3.2" key={`open-${stringIndex}`} />
+        ))}
+        {model.mutedStrings.map((stringIndex) => (
+          <g className="chord-diagram__muted" key={`muted-${stringIndex}`}>
+            <line x1={stringX(stringIndex) - 3} y1="16" x2={stringX(stringIndex) + 3} y2="22" />
+            <line x1={stringX(stringIndex) + 3} y1="16" x2={stringX(stringIndex) - 3} y2="22" />
+          </g>
+        ))}
+        {Array.from({ length: model.fretCount + 1 }, (_, fretLine) => (
+          <line
+            className={`chord-diagram__fret ${fretLine === 0 && model.baseFret === 1 ? "is-nut" : ""}`}
+            x1="20"
+            y1={nutY + fretLine * fretHeight}
+            x2="68"
+            y2={nutY + fretLine * fretHeight}
+            key={`fret-${fretLine}`}
+          />
+        ))}
+        {Array.from({ length: 4 }, (_, stringIndex) => (
+          <line
+            className="chord-diagram__string"
+            x1={stringX(stringIndex)}
+            y1={nutY}
+            x2={stringX(stringIndex)}
+            y2={nutY + gridHeight}
+            key={`string-${stringIndex}`}
+          />
+        ))}
+        {model.baseFret > 1 && (
+          <text className="chord-diagram__base-fret" x="14" y={nutY + fretHeight * 0.7} textAnchor="end">
+            {model.baseFret}
+          </text>
+        )}
+        {model.dots.map((dot) => {
+          const centerY = nutY + (dot.displayFret - 0.5) * fretHeight;
+          return (
+            <g key={`dot-${dot.stringIndex}-${dot.actualFret}`}>
+              <circle className="chord-diagram__dot" cx={stringX(dot.stringIndex)} cy={centerY} r="7" />
+              <text className="chord-diagram__finger" x={stringX(dot.stringIndex)} y={centerY + 2.6} textAnchor="middle">
+                {dot.finger}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </span>
+  );
+}
+
+const STRUM_SYMBOLS: Record<StrumDirection, string> = {
+  down: "↓",
+  up: "↑",
+  chuck: "×",
+};
+
+function RhythmGuide({ rhythm }: { rhythm: RhythmSuggestion }) {
+  return (
+    <div className="rhythm-guide">
+      <div className="rhythm-guide__copy">
+        <span className="eyebrow">SUGGESTED STRUM</span>
+        <strong>{rhythm.label}</strong>
+        <p>{rhythm.description}</p>
+      </div>
+      <div className="rhythm-guide__pattern" aria-label={`${rhythm.label}，约 ${rhythm.tempoBpm} BPM`}>
+        {Array.from({ length: 8 }, (_, subdivision) => {
+          const stroke = rhythm.strokes.find((candidate) => candidate.subdivision === subdivision);
+          return (
+            <span className={`${stroke ? "has-stroke" : ""} ${stroke?.accent ? "is-accent" : ""}`} key={subdivision}>
+              <small>{subdivision % 2 === 0 ? subdivision / 2 + 1 : "&"}</small>
+              <b>{stroke ? STRUM_SYMBOLS[stroke.direction] : "·"}</b>
+            </span>
+          );
+        })}
+      </div>
+      <div className="rhythm-guide__tempo">
+        <strong>{rhythm.tempoBpm}</strong>
+        <span>BPM / 估算</span>
+        <i>播放按钮采用此节奏</i>
+      </div>
+    </div>
+  );
+}
+
 type ChordTrackProps = {
   chords: ChordEvent[];
   currentTime: number;
   tuning: TuningId;
   displayMode: ChordDisplayMode;
   beginnerPlan: BeginnerChordPlan;
+  rhythm: RhythmSuggestion;
   isPreviewing: boolean;
   onDisplayModeChange: (mode: ChordDisplayMode) => void;
   onTogglePreview: () => void;
@@ -121,6 +232,7 @@ function ChordTrack({
   tuning,
   displayMode,
   beginnerPlan,
+  rhythm,
   isPreviewing,
   onDisplayModeChange,
   onTogglePreview,
@@ -140,7 +252,7 @@ function ChordTrack({
           </div>
           <button type="button" className={`score-play-button ${isPreviewing ? "is-playing" : ""}`} onClick={onTogglePreview} disabled={chords.length === 0}>
             {isPreviewing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-            {isPreviewing ? "停止和弦" : "播放和弦"}
+            {isPreviewing ? "停止和弦" : "按节奏播放"}
           </button>
         </div>
       </header>
@@ -152,6 +264,8 @@ function ChordTrack({
           <i>7 / SUS / DIM 会近似简化</i>
         </div>
       )}
+
+      {chords.length > 0 && <RhythmGuide rhythm={rhythm} />}
 
       {chords.length > 0 ? (
         <div className="chord-timeline">
@@ -176,12 +290,7 @@ function ChordTrack({
                 {beginnerChord?.simplified && <span className="chord-event__source">原谱 {chord.name}</span>}
                 {voicing && (
                   <span className="chord-voicing" aria-label={`${TUNINGS[tuning].shortLabel} 品位 ${voicing.join(" ")}`}>
-                    <span className="chord-voicing__strings">
-                      {TUNINGS[tuning].stringNames.map((stringName) => <i key={stringName}>{stringName}</i>)}
-                    </span>
-                    <span className="chord-voicing__frets">
-                      {voicing.map((fret, fretIndex) => <i key={`${fret}-${fretIndex}`}>{fret}</i>)}
-                    </span>
+                    <ChordDiagram frets={voicing} stringNames={TUNINGS[tuning].stringNames} />
                   </span>
                 )}
                 <span className="chord-event__confidence">{Math.round(chord.confidence * 100)}%</span>
@@ -234,6 +343,15 @@ function App() {
   const beginnerPlan = useMemo(
     () => createBeginnerChordPlan(chords, tuning),
     [chords, tuning],
+  );
+  const rhythmSuggestion = useMemo(
+    () => suggestRhythm(
+      detectedNotes,
+      chords,
+      prepared?.duration ?? 0,
+      chordDisplayMode === "beginner",
+    ),
+    [chordDisplayMode, chords, detectedNotes, prepared?.duration],
   );
   const scoreTime = synthMode ? synthTime : currentTime;
   const activeNoteIndex = useMemo(() => {
@@ -401,6 +519,7 @@ function App() {
         chords,
         tuning,
         chordDisplayMode === "beginner" ? beginnerPlan : undefined,
+        rhythmSuggestion,
       ),
       chords[0]?.startTimeSeconds ?? 0,
     );
@@ -601,6 +720,7 @@ function App() {
                   tuning={tuning}
                   displayMode={chordDisplayMode}
                   beginnerPlan={beginnerPlan}
+                  rhythm={rhythmSuggestion}
                   isPreviewing={synthMode === "chords"}
                   onDisplayModeChange={changeChordDisplayMode}
                   onTogglePreview={toggleChordPreview}

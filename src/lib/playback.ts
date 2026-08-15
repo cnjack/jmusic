@@ -1,5 +1,6 @@
 import type { BeginnerChordPlan } from "./beginner";
 import { getUkuleleVoicing, type ChordEvent } from "./chords";
+import type { RhythmSuggestion, StrumDirection } from "./rhythm";
 import { TUNINGS, type TabNote, type TuningId } from "./ukulele";
 
 export type SynthEvent = {
@@ -33,33 +34,94 @@ export function buildChordPlaybackSequence(
   chords: ChordEvent[],
   tuning: TuningId,
   beginnerPlan?: BeginnerChordPlan,
+  rhythm?: RhythmSuggestion,
 ): PlaybackSequence {
   if (chords.length === 0) return { events: [], durationSeconds: 0 };
   const origin = chords[0].startTimeSeconds;
   const events: SynthEvent[] = [];
 
-  chords.forEach((chord, chordIndex) => {
+  const addStrum = (
+    chord: ChordEvent,
+    chordIndex: number,
+    startTimeSeconds: number,
+    direction: StrumDirection = "down",
+    accent = false,
+  ) => {
     const beginnerChord = beginnerPlan?.chords[chordIndex];
     const frets = beginnerChord?.frets ??
       getUkuleleVoicing(chord.rootPitchClass, chord.quality, tuning);
     if (!frets) return;
 
-    frets.forEach((fret, stringIndex) => {
+    const stringOrder = direction === "up" ? [3, 2, 1, 0] : [0, 1, 2, 3];
+    const isChuck = direction === "chuck";
+    stringOrder.forEach((stringIndex, orderIndex) => {
+      const fret = frets[stringIndex];
       events.push({
         midi: TUNINGS[tuning].strings[stringIndex] + fret + (beginnerPlan?.capo ?? 0),
         startTimeSeconds:
-          Math.max(0, chord.startTimeSeconds - origin) + stringIndex * 0.032,
-        durationSeconds: Math.min(2.8, Math.max(0.42, chord.durationSeconds * 0.88)),
-        velocity: Math.max(0.46, 0.78 - stringIndex * 0.055),
+          Math.max(0, startTimeSeconds) +
+          orderIndex * (isChuck ? 0.012 : rhythm ? 0.028 : 0.032),
+        durationSeconds: isChuck
+          ? 0.075
+          : rhythm
+            ? Math.min(1.3, Math.max(0.2, 54 / rhythm.tempoBpm))
+            : Math.min(2.8, Math.max(0.42, chord.durationSeconds * 0.88)),
+        velocity: isChuck
+          ? 0.42
+          : Math.max(0.44, (accent ? 0.88 : 0.72) - orderIndex * 0.045),
       });
     });
-  });
+  };
 
-  const durationSeconds = Math.max(
+  if (!rhythm) {
+    chords.forEach((chord, chordIndex) => {
+      addStrum(chord, chordIndex, chord.startTimeSeconds - origin);
+    });
+  } else {
+    const beatSeconds = 60 / rhythm.tempoBpm;
+    const barSeconds = rhythm.beatsPerBar * beatSeconds;
+    const timelineDuration =
+      chords[chords.length - 1].startTimeSeconds - origin +
+      chords[chords.length - 1].durationSeconds;
+
+    for (
+      let barStart = 0;
+      barStart < timelineDuration && events.length < 4_096;
+      barStart += barSeconds
+    ) {
+      rhythm.strokes.forEach((stroke) => {
+        const strokeTime = barStart + stroke.subdivision * beatSeconds / 2;
+        if (strokeTime >= timelineDuration || events.length >= 4_096) return;
+
+        let activeChordIndex = -1;
+        for (let chordIndex = 0; chordIndex < chords.length; chordIndex += 1) {
+          const chord = chords[chordIndex];
+          const chordStart = chord.startTimeSeconds - origin;
+          const chordEnd = chordStart + chord.durationSeconds;
+          if (strokeTime >= chordStart && strokeTime < chordEnd) activeChordIndex = chordIndex;
+          if (chordStart > strokeTime) break;
+        }
+        if (activeChordIndex < 0) return;
+        addStrum(
+          chords[activeChordIndex],
+          activeChordIndex,
+          strokeTime,
+          stroke.direction,
+          stroke.accent,
+        );
+      });
+    }
+  }
+
+  const timelineDuration =
     chords[chords.length - 1].startTimeSeconds - origin +
-      chords[chords.length - 1].durationSeconds,
-    ...events.map((event) => event.startTimeSeconds + event.durationSeconds),
-  );
+    chords[chords.length - 1].durationSeconds;
+  const durationSeconds = events.length > 0
+    ? Math.max(
+      timelineDuration,
+      ...events.map((event) => event.startTimeSeconds + event.durationSeconds),
+    )
+    : timelineDuration;
   return { events, durationSeconds };
 }
 

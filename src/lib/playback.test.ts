@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createBeginnerChordPlan } from "./beginner";
 import { buildChordPlaybackSequence, buildMelodyPlaybackSequence } from "./playback";
 import type { ChordEvent } from "./chords";
+import type { RhythmSuggestion } from "./rhythm";
 import type { TabNote } from "./ukulele";
 
 const chord = (name: string, rootPitchClass: number, startTimeSeconds = 0): ChordEvent => ({
@@ -41,5 +42,25 @@ describe("generated ukulele playback", () => {
 
     expect(plan.capo).toBe(1);
     expect(new Set(firstChordPitchClasses)).toEqual(new Set([1, 5, 8]));
+  });
+
+  it("repeats the suggested rhythm and reverses string order for an up strum", () => {
+    const rhythm: RhythmSuggestion = {
+      id: "island",
+      label: "test",
+      description: "test",
+      tempoBpm: 120,
+      beatsPerBar: 4,
+      strokes: [
+        { subdivision: 0, direction: "down", accent: true },
+        { subdivision: 1, direction: "up" },
+      ],
+    };
+    const sequence = buildChordPlaybackSequence([chord("C", 0)], "high-g", undefined, rhythm);
+
+    expect(sequence.events).toHaveLength(8);
+    expect(sequence.events.slice(0, 4).map(({ midi }) => midi)).toEqual([67, 60, 64, 72]);
+    expect(sequence.events.slice(4, 8).map(({ midi }) => midi)).toEqual([72, 64, 60, 67]);
+    expect(sequence.events[4].startTimeSeconds).toBe(0.25);
   });
 });
