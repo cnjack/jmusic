@@ -245,6 +245,52 @@ button { color: inherit; }
   margin: 0;
   letter-spacing: -.025em;
 }
+.score-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.score-controls--dark { color: var(--paper); }
+.arrangement-switch { display: flex; }
+.arrangement-switch button {
+  min-width: 50px;
+  height: 32px;
+  border: 1px solid rgba(242,239,227,.22);
+  background: transparent;
+  color: rgba(242,239,227,.5);
+  font-size: 9px;
+  cursor: pointer;
+}
+.arrangement-switch button + button { border-left: 0; }
+.arrangement-switch button.is-selected { background: var(--paper); color: var(--ink); }
+.score-play-button {
+  height: 32px;
+  border: 1px solid var(--acid);
+  background: var(--acid);
+  color: var(--ink);
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: 130ms ease;
+}
+.score-play-button:hover:not(:disabled) { transform: translateY(-1px); }
+.score-play-button:disabled { opacity: .25; cursor: default; }
+.score-play-button.is-playing { background: var(--signal); border-color: var(--signal); }
+.score-play-button--light { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.score-play-button--light.is-playing { background: var(--signal); color: var(--ink); }
+.beginner-banner {
+  min-height: 42px;
+  padding: 0 14px 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid rgba(242,239,227,.13);
+  background: rgba(216,244,90,.07);
+}
+.beginner-banner strong { color: var(--acid); font-size: 9px; letter-spacing: .12em; }
+.beginner-banner span { color: rgba(242,239,227,.62); font-size: 9px; }
+.beginner-banner i { margin-left: auto; color: rgba(242,239,227,.32); font-style: normal; font-size: 7px; letter-spacing: .08em; }
 .chord-sheet .score-legend { color: rgba(242,239,227,.48); }
 .chord-sheet .score-legend i { background: var(--acid); }
 .chord-sheet .score-sheet__footer { border-color: rgba(242,239,227,.13); color: rgba(242,239,227,.38); }
@@ -290,7 +336,9 @@ button { color: inherit; }
   font-weight: 650;
   letter-spacing: -.035em;
 }
-.chord-voicing { display: block; width: 82px; margin-top: 15px; }
+.chord-event__source { display: block; min-height: 10px; margin-top: 3px; color: rgba(242,239,227,.38); font-size: 7px; letter-spacing: .04em; }
+.chord-event.is-active .chord-event__source { color: rgba(32,34,29,.48); }
+.chord-voicing { display: block; width: 82px; margin-top: 8px; }
 .chord-voicing__strings, .chord-voicing__frets { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; }
 .chord-voicing i { font-style: normal; }
 .chord-voicing__strings i { color: rgba(242,239,227,.34); font-family: "Newsreader Variable", serif; font-size: 8px; }
@@ -315,7 +363,7 @@ button { color: inherit; }
 
 .score-sheet { margin-top: 25px; border: 1px solid rgba(32,34,29,.42); background: #f7f3e6; box-shadow: 8px 9px 0 rgba(32,34,29,.07); animation: score-in 380ms ease both; }
 @keyframes score-in { from { opacity: 0; transform: translateY(8px); } }
-.score-sheet__header { min-height: 92px; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(32,34,29,.25); }
+.score-sheet__header { min-height: 92px; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid rgba(32,34,29,.25); }
 .score-sheet__header h2 { font-family: "Newsreader Variable", serif; font-weight: 560; font-size: 28px; margin: 0; letter-spacing: -.025em; }
 .score-legend { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
 .score-legend i { width: 3px; height: 3px; border-radius: 50%; background: var(--signal); }
@@ -362,5 +410,9 @@ audio { display: none; }
   .record-disc { width: 88px; height: 88px; }
   .score-sheet__header { align-items: flex-start; gap: 18px; }
   .score-legend { flex-direction: column; align-items: flex-end; }
-  .chord-sheet__header { align-items: flex-start; }
+  .chord-sheet__header { align-items: flex-start; flex-direction: column; }
+  .score-controls { align-items: flex-end; flex-direction: column; }
+  .score-controls--dark { width: 100%; align-items: center; flex-direction: row; justify-content: space-between; }
+  .beginner-banner { align-items: flex-start; flex-direction: column; padding-block: 10px; gap: 3px; }
+  .beginner-banner i { margin-left: 0; }
 }

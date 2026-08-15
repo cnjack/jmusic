@@ -19,11 +19,21 @@ import {
 import "./App.css";
 import { prepareAudio, type PreparedAudio } from "./lib/audio";
 import {
+  createBeginnerChordPlan,
+  type BeginnerChordPlan,
+} from "./lib/beginner";
+import {
   detectChords,
   getUkuleleVoicing,
   type ChordEvent,
 } from "./lib/chords";
 import { createChordDemoFile } from "./lib/demo-audio";
+import {
+  buildChordPlaybackSequence,
+  buildMelodyPlaybackSequence,
+  LocalUkulelePlayer,
+  type PlaybackSequence,
+} from "./lib/playback";
 import { transcribeLocally } from "./lib/transcription";
 import {
   mapNotesToUkulele,
@@ -35,6 +45,8 @@ import {
 } from "./lib/ukulele";
 
 type Phase = "empty" | "decoding" | "ready" | "analyzing" | "done" | "error";
+type ChordDisplayMode = "original" | "beginner";
+type SynthMode = "chords" | "melody" | null;
 
 const formatTime = (seconds: number) => {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -95,24 +107,58 @@ type ChordTrackProps = {
   chords: ChordEvent[];
   currentTime: number;
   tuning: TuningId;
-  onSelect: (chord: ChordEvent) => void;
+  displayMode: ChordDisplayMode;
+  beginnerPlan: BeginnerChordPlan;
+  isPreviewing: boolean;
+  onDisplayModeChange: (mode: ChordDisplayMode) => void;
+  onTogglePreview: () => void;
+  onSelect: (chord: ChordEvent, index: number) => void;
 };
 
-function ChordTrack({ chords, currentTime, tuning, onSelect }: ChordTrackProps) {
+function ChordTrack({
+  chords,
+  currentTime,
+  tuning,
+  displayMode,
+  beginnerPlan,
+  isPreviewing,
+  onDisplayModeChange,
+  onTogglePreview,
+  onSelect,
+}: ChordTrackProps) {
   return (
     <section className="chord-sheet">
       <header className="chord-sheet__header">
         <div>
-          <span className="eyebrow">CHORD MAP / AUTO</span>
-          <h2>尤克里里和弦时间轴</h2>
+          <span className="eyebrow">CHORD MAP / {displayMode === "beginner" ? "EASY" : "AUTO"}</span>
+          <h2>{displayMode === "beginner" ? "初学者和弦谱" : "尤克里里和弦时间轴"}</h2>
         </div>
-        <div className="score-legend"><span>本地复音识别</span><i /><span>点击和弦试听定位</span></div>
+        <div className="score-controls score-controls--dark">
+          <div className="arrangement-switch" role="group" aria-label="和弦难度">
+            <button type="button" className={displayMode === "original" ? "is-selected" : ""} onClick={() => onDisplayModeChange("original")}>原曲</button>
+            <button type="button" className={displayMode === "beginner" ? "is-selected" : ""} onClick={() => onDisplayModeChange("beginner")}>初学者</button>
+          </div>
+          <button type="button" className={`score-play-button ${isPreviewing ? "is-playing" : ""}`} onClick={onTogglePreview} disabled={chords.length === 0}>
+            {isPreviewing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+            {isPreviewing ? "停止和弦" : "播放和弦"}
+          </button>
+        </div>
       </header>
+
+      {displayMode === "beginner" && chords.length > 0 && (
+        <div className="beginner-banner">
+          <strong>{beginnerPlan.capo > 0 ? `CAPO ${beginnerPlan.capo}` : "OPEN POSITION"}</strong>
+          <span>{beginnerPlan.capo > 0 ? "夹变调夹后按下方简单指法，保持原曲调性" : "无需变调夹，优先开放和弦与低把位"}</span>
+          <i>7 / SUS / DIM 会近似简化</i>
+        </div>
+      )}
 
       {chords.length > 0 ? (
         <div className="chord-timeline">
           {chords.map((chord, index) => {
-            const voicing = getUkuleleVoicing(chord.rootPitchClass, chord.quality, tuning);
+            const beginnerChord = displayMode === "beginner" ? beginnerPlan.chords[index] : undefined;
+            const chordName = beginnerChord?.name ?? chord.name;
+            const voicing = beginnerChord?.frets ?? getUkuleleVoicing(chord.rootPitchClass, chord.quality, tuning);
             const isActive =
               currentTime >= chord.startTimeSeconds &&
               currentTime < chord.startTimeSeconds + chord.durationSeconds;
@@ -121,12 +167,13 @@ function ChordTrack({ chords, currentTime, tuning, onSelect }: ChordTrackProps) 
                 type="button"
                 className={`chord-event ${isActive ? "is-active" : ""}`}
                 style={{ "--chord-weight": Math.max(1, chord.durationSeconds) } as CSSProperties}
-                onClick={() => onSelect(chord)}
+                onClick={() => onSelect(chord, index)}
                 key={`${chord.name}-${chord.startTimeSeconds}-${index}`}
-                aria-label={`${formatTime(chord.startTimeSeconds)}，${chord.name} 和弦`}
+                aria-label={`${formatTime(chord.startTimeSeconds)}，${chordName} 和弦，直接试听`}
               >
                 <span className="chord-event__time">{formatTime(chord.startTimeSeconds)}</span>
-                <strong>{chord.name}</strong>
+                <strong>{chordName}</strong>
+                {beginnerChord?.simplified && <span className="chord-event__source">原谱 {chord.name}</span>}
                 {voicing && (
                   <span className="chord-voicing" aria-label={`${TUNINGS[tuning].shortLabel} 品位 ${voicing.join(" ")}`}>
                     <span className="chord-voicing__strings">
@@ -148,7 +195,7 @@ function ChordTrack({ chords, currentTime, tuning, onSelect }: ChordTrackProps) 
           <span>单音音阶或独奏不会被强行标成和弦；可载入左侧 C · Am · F · G 样例验证。</span>
         </div>
       )}
-      <footer className="score-sheet__footer"><span>AUTO DRAFT — VERIFY BY EAR</span><span>MAJOR · MINOR · 7 · MAJ7 · M7 · SUS · DIM</span></footer>
+      <footer className="score-sheet__footer"><span>CLICK A CHORD TO HEAR THE GENERATED VOICING</span><span>{displayMode === "beginner" ? "BEGINNER APPROXIMATION" : "MAJOR · MINOR · 7 · MAJ7 · M7 · SUS · DIM"}</span></footer>
     </section>
   );
 }
@@ -157,6 +204,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const synthPlayerRef = useRef<LocalUkulelePlayer | null>(null);
   const [phase, setPhase] = useState<Phase>("empty");
   const [fileName, setFileName] = useState("尚未载入素材");
   const [audioUrl, setAudioUrl] = useState("");
@@ -169,31 +217,62 @@ function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [synthMode, setSynthMode] = useState<SynthMode>(null);
+  const [synthTime, setSynthTime] = useState(0);
+  const [chordDisplayMode, setChordDisplayMode] = useState<ChordDisplayMode>("original");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(
     () => () => {
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      synthPlayerRef.current?.stop();
     },
     [],
   );
 
   const phrases = useMemo(() => splitIntoPhrases(tabNotes, 8), [tabNotes]);
+  const beginnerPlan = useMemo(
+    () => createBeginnerChordPlan(chords, tuning),
+    [chords, tuning],
+  );
+  const scoreTime = synthMode ? synthTime : currentTime;
   const activeNoteIndex = useMemo(() => {
     if (tabNotes.length === 0) return -1;
     const exact = tabNotes.findIndex(
       (note) =>
-        currentTime >= note.startTimeSeconds &&
-        currentTime <= note.startTimeSeconds + Math.max(note.durationSeconds, 0.12),
+        scoreTime >= note.startTimeSeconds &&
+        scoreTime <= note.startTimeSeconds + Math.max(note.durationSeconds, 0.12),
     );
     if (exact >= 0) return exact;
     for (let index = tabNotes.length - 1; index >= 0; index -= 1) {
-      if (tabNotes[index].startTimeSeconds <= currentTime) return index;
+      if (tabNotes[index].startTimeSeconds <= scoreTime) return index;
     }
     return -1;
-  }, [currentTime, tabNotes]);
+  }, [scoreTime, tabNotes]);
+
+  function stopSynthPreview() {
+    synthPlayerRef.current?.stop();
+    setSynthMode(null);
+    setSynthTime(0);
+  }
+
+  function playSynthSequence(mode: Exclude<SynthMode, null>, sequence: PlaybackSequence, sourceOffset = 0) {
+    if (sequence.events.length === 0) return;
+    audioRef.current?.pause();
+    if (!synthPlayerRef.current) synthPlayerRef.current = new LocalUkulelePlayer();
+    setSynthMode(mode);
+    setSynthTime(sourceOffset);
+    void synthPlayerRef.current.play(sequence, {
+      onProgress: (elapsedSeconds) => setSynthTime(sourceOffset + elapsedSeconds),
+      onEnded: () => {
+        setSynthMode(null);
+        setSynthTime(0);
+      },
+    });
+  }
 
   async function loadFile(file: File) {
+    stopSynthPreview();
     setPhase("decoding");
     setErrorMessage("");
     setFileName(file.name);
@@ -260,6 +339,7 @@ function App() {
   }
 
   function changeTuning(nextTuning: TuningId) {
+    stopSynthPreview();
     setTuning(nextTuning);
     if (detectedNotes.length > 0) setTabNotes(mapNotesToUkulele(detectedNotes, nextTuning));
   }
@@ -267,34 +347,72 @@ function App() {
   async function togglePlayback() {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-    if (audio.paused) await audio.play();
+    if (audio.paused) {
+      stopSynthPreview();
+      await audio.play();
+    }
     else audio.pause();
   }
 
   function seekTo(ratio: number) {
     const audio = audioRef.current;
     if (!audio || !prepared) return;
+    stopSynthPreview();
     audio.currentTime = Math.max(0, Math.min(1, ratio)) * prepared.duration;
     setCurrentTime(audio.currentTime);
   }
 
   function selectTabNote(note: TabNote) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = note.startTimeSeconds;
-    setCurrentTime(note.startTimeSeconds);
-    void audio.play();
+    playSynthSequence("melody", buildMelodyPlaybackSequence([note]), note.startTimeSeconds);
   }
 
-  function selectChord(chord: ChordEvent) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = chord.startTimeSeconds;
-    setCurrentTime(chord.startTimeSeconds);
-    void audio.play();
+  function selectChord(chord: ChordEvent, index: number) {
+    const singleBeginnerPlan = chordDisplayMode === "beginner" ? {
+      ...beginnerPlan,
+      chords: beginnerPlan.chords[index] ? [beginnerPlan.chords[index]] : [],
+    } : undefined;
+    playSynthSequence(
+      "chords",
+      buildChordPlaybackSequence([chord], tuning, singleBeginnerPlan),
+      chord.startTimeSeconds,
+    );
+  }
+
+  function toggleMelodyPreview() {
+    if (synthMode === "melody") {
+      stopSynthPreview();
+      return;
+    }
+    playSynthSequence(
+      "melody",
+      buildMelodyPlaybackSequence(tabNotes),
+      tabNotes[0]?.startTimeSeconds ?? 0,
+    );
+  }
+
+  function toggleChordPreview() {
+    if (synthMode === "chords") {
+      stopSynthPreview();
+      return;
+    }
+    playSynthSequence(
+      "chords",
+      buildChordPlaybackSequence(
+        chords,
+        tuning,
+        chordDisplayMode === "beginner" ? beginnerPlan : undefined,
+      ),
+      chords[0]?.startTimeSeconds ?? 0,
+    );
+  }
+
+  function changeChordDisplayMode(mode: ChordDisplayMode) {
+    stopSynthPreview();
+    setChordDisplayMode(mode);
   }
 
   function reset() {
+    stopSynthPreview();
     audioRef.current?.pause();
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = null;
@@ -371,7 +489,7 @@ function App() {
 
           <div className="rail-note">
             <FlaskConical size={16} />
-            <p>这个 PoC 验证自动和弦时间轴与单旋律 TAB。复杂转调和完整指弹编配仍需人工校正。</p>
+            <p>自动和弦、初学者简化和旋律 TAB 都能在本机直接试听。复杂指弹编配仍需人工校正。</p>
           </div>
 
           <div className="pipeline-list">
@@ -423,8 +541,8 @@ function App() {
               className={`icon-button mute-button ${isMuted ? "is-active" : ""}`}
               onClick={() => setIsMuted((muted) => !muted)}
               disabled={!audioUrl}
-              title={isMuted ? "恢复声音" : "静音播放"}
-              aria-label={isMuted ? "取消静音" : "静音播放"}
+              title={isMuted ? "恢复原曲声音" : "原曲静音"}
+              aria-label={isMuted ? "取消原曲静音" : "原曲静音"}
               aria-pressed={isMuted}
             >
               {isMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
@@ -477,14 +595,30 @@ function App() {
               ) : null}
 
               {phase === "done" && (
-                <ChordTrack chords={chords} currentTime={currentTime} tuning={tuning} onSelect={selectChord} />
+                <ChordTrack
+                  chords={chords}
+                  currentTime={scoreTime}
+                  tuning={tuning}
+                  displayMode={chordDisplayMode}
+                  beginnerPlan={beginnerPlan}
+                  isPreviewing={synthMode === "chords"}
+                  onDisplayModeChange={changeChordDisplayMode}
+                  onTogglePreview={toggleChordPreview}
+                  onSelect={selectChord}
+                />
               )}
 
               {phase === "done" && tabNotes.length > 0 && (
                 <section className="score-sheet">
                   <header className="score-sheet__header">
                     <div><span className="eyebrow">MELODY DRAFT / AUTO</span><h2>尤克里里旋律 TAB</h2></div>
-                    <div className="score-legend"><span>{TUNINGS[tuning].label}</span><i /><span>点击数字试听定位</span></div>
+                    <div className="score-controls">
+                      <div className="score-legend"><span>{TUNINGS[tuning].label}</span><i /><span>点击数字直接试听</span></div>
+                      <button type="button" className={`score-play-button score-play-button--light ${synthMode === "melody" ? "is-playing" : ""}`} onClick={toggleMelodyPreview}>
+                        {synthMode === "melody" ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+                        {synthMode === "melody" ? "停止指弹" : "播放指弹"}
+                      </button>
+                    </div>
                   </header>
                   <div className="tab-systems">
                     {phrases.map((phrase, phraseIndex) => (
@@ -499,7 +633,7 @@ function App() {
                       />
                     ))}
                   </div>
-                  <footer className="score-sheet__footer"><span>AUTO DRAFT — VERIFY BY EAR</span><span>OCTAVE-FOLDED WHEN OUT OF RANGE</span></footer>
+                  <footer className="score-sheet__footer"><span>CLICK A FRET TO HEAR THE GENERATED NOTE</span><span>LOCAL SYNTH · OCTAVE-FOLDED WHEN OUT OF RANGE</span></footer>
                 </section>
               )}
 
